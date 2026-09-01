@@ -1,0 +1,37 @@
+#!/bin/sh
+cd "${0%/*}" || exit                                # Run from this directory
+. ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions        # Tutorial run functions
+#------------------------------------------------------------------------------
+
+rm -rf 0
+
+runApplication blockMesh
+
+runApplication surfaceFeatureExtract
+
+runApplication snappyHexMesh -overwrite
+
+# solid.stl is a baffle. Walk from a seed in each fluid (no geometric
+# cylinder) so the split follows the STL; drop exterior cells, then split.
+runApplication topoSet
+runApplication subsetMesh keepCells -overwrite -patches "(solid)"
+
+# Tube walls are still coincident baffles (solid / solid_slave). Merge those
+# pairs back to internal faces so splitMeshRegions can couple them as
+# mappedWalls. Single-sided faces (shell outer, heads) stay walls.
+runApplication mergeOrSplitBaffles -overwrite
+
+runApplication splitMeshRegions -cellZonesOnly -overwrite
+
+if [ ! -f constant/hot_fluid/polyMesh/points ] || \
+   [ ! -f constant/cold_fluid/polyMesh/points ]
+then
+    echo "Error: splitMeshRegions did not create both region meshes."
+    echo "Check log.topoSet, log.subsetMesh and log.splitMeshRegions."
+    exit 1
+fi
+
+# Fields are already set per region in 0.orig (no changeDictionary).
+restore0Dir
+
+#------------------------------------------------------------------------------

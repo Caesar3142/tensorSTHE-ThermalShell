@@ -1,0 +1,57 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2406                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      surfaceFeatureExtractDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+solid.stl
+{
+    extractionMethod    extractFromSurface;
+    includedAngle       150;
+    geometricTestOnly   no;
+    writeObj            yes;
+}
+
+inlet_cold.stl
+{
+    extractionMethod    extractFromSurface;
+    includedAngle       150;
+    geometricTestOnly   no;
+    writeObj            yes;
+}
+
+outlet_cold.stl
+{
+    extractionMethod    extractFromSurface;
+    includedAngle       150;
+    geometricTestOnly   no;
+    writeObj            yes;
+}
+
+inlet_hot.stl
+{
+    extractionMethod    extractFromSurface;
+    includedAngle       150;
+    geometricTestOnly   no;
+    writeObj            yes;
+}
+
+outlet_hot.stl
+{
+    extractionMethod    extractFromSurface;
+    includedAngle       150;
+    geometricTestOnly   no;
+    writeObj            yes;
+}
+
+// ************************************************************************* //

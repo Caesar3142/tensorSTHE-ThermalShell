@@ -1,0 +1,173 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2406                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      snappyHexMeshDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+castellatedMesh true;
+snap            true;
+addLayers       false;
+
+geometry
+{
+    solid.stl
+    {
+        type triSurfaceMesh;
+        name solid;
+    }
+    inlet_cold.stl
+    {
+        type triSurfaceMesh;
+        name inlet_cold;
+    }
+    outlet_cold.stl
+    {
+        type triSurfaceMesh;
+        name outlet_cold;
+    }
+    inlet_hot.stl
+    {
+        type triSurfaceMesh;
+        name inlet_hot;
+    }
+    outlet_hot.stl
+    {
+        type triSurfaceMesh;
+        name outlet_hot;
+    }
+}
+
+castellatedMeshControls
+{
+    maxLocalCells       1000000;
+    maxGlobalCells      4000000;
+    minRefinementCells  0;
+    maxLoadUnbalance    0.10;
+    nCellsBetweenLevels 2;
+
+    features
+    (
+        { file "solid.eMesh";       level 2; }
+        { file "inlet_cold.eMesh";  level 2; }
+        { file "outlet_cold.eMesh"; level 2; }
+        { file "inlet_hot.eMesh";   level 2; }
+        { file "outlet_hot.eMesh";  level 2; }
+    );
+
+    refinementSurfaces
+    {
+        solid
+        {
+            level (1 2);
+            faceZone solid;
+            faceType baffle;
+            patchInfo
+            {
+                type wall;
+            }
+        }
+        inlet_cold
+        {
+            level (2 2);
+            patchInfo { type patch; }
+        }
+        outlet_cold
+        {
+            level (2 2);
+            patchInfo { type patch; }
+        }
+        inlet_hot
+        {
+            level (2 2);
+            patchInfo { type patch; }
+        }
+        outlet_hot
+        {
+            level (2 2);
+            patchInfo { type patch; }
+        }
+    }
+
+    resolveFeatureAngle 30;
+
+    refinementRegions
+    {
+    }
+
+    // Must sit inside each fluid and off cell faces.
+    // hot: tube-side header; cold: shell-side inlet nozzle.
+    locationsInMesh
+    (
+        ((0.11 0.01 0.01)   hot_fluid)
+        ((1.80 0.01 -0.22)  cold_fluid)
+    );
+
+    allowFreeStandingZoneFaces true;
+}
+
+snapControls
+{
+    nSmoothPatch    3;
+    tolerance       2.0;
+    nSolveIter      100;
+    nRelaxIter      5;
+    nFeatureSnapIter 10;
+    implicitFeatureSnap false;
+    explicitFeatureSnap true;
+    multiRegionFeatureSnap true;
+}
+
+addLayersControls
+{
+    relativeSizes       true;
+    layers
+    {
+    }
+    expansionRatio      1.2;
+    finalLayerThickness 0.3;
+    minThickness        0.1;
+    nGrow               0;
+    featureAngle        60;
+    nRelaxIter          3;
+    nSmoothSurfaceNormals 1;
+    nSmoothNormals      3;
+    nSmoothThickness    10;
+    maxFaceThicknessRatio 0.5;
+    maxThicknessToMedialRatio 0.3;
+    minMedialAxisAngle  90;
+    nBufferCellsNoExtrude 0;
+    nLayerIter          50;
+}
+
+meshQualityControls
+{
+    maxNonOrtho         65;
+    maxBoundarySkewness 20;
+    maxInternalSkewness 4;
+    maxConcave          80;
+    minVol              1e-13;
+    minTetQuality       1e-15;
+    minArea             -1;
+    minTwist            0.02;
+    minDeterminant      0.001;
+    minFaceWeight       0.05;
+    minVolRatio         0.01;
+    minTriangleTwist    -1;
+    minEdgeLength       -1;
+    nSmoothScale        4;
+    errorReduction      0.75;
+}
+
+mergeTolerance 1e-6;
+
+// ************************************************************************* //

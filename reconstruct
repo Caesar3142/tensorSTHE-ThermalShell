@@ -1,0 +1,14 @@
+#!/bin/sh
+cd "${0%/*}" || exit                                # Run from this directory
+. ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions        # Tutorial run functions
+#------------------------------------------------------------------------------
+
+# Must use -region. Bare reconstructPar looks for the default mesh (region0)
+# and fails. -o lets you re-run after a Ctrl-C; otherwise runApplication skips
+# a region whose log already exists and later times stay incomplete.
+for region in $(foamListRegions)
+do
+    runApplication -o -s "$region" reconstructPar -region "$region"
+done
+
+#------------------------------------------------------------------------------

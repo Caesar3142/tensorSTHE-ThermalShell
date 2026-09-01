@@ -1,0 +1,72 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2406                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      topoSetDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// After snappyHexMesh, solid.stl is a baffle (solid / solid_slave).
+// Walking cannot cross those faces, so the two fluids follow the STL
+// rather than a geometric cylinder.
+
+actions
+(
+    {
+        name        hot_fluid;
+        type        cellSet;
+        action      new;
+        source      regionToCell;
+        insidePoints ((0.11 0.01 0.01));
+    }
+
+    {
+        name        cold_fluid;
+        type        cellSet;
+        action      new;
+        source      regionToCell;
+        insidePoints ((1.80 0.01 -0.22));
+    }
+
+    {
+        name        keepCells;
+        type        cellSet;
+        action      new;
+        source      cellToCell;
+        set         hot_fluid;
+    }
+
+    {
+        name        keepCells;
+        type        cellSet;
+        action      add;
+        source      cellToCell;
+        set         cold_fluid;
+    }
+
+    {
+        name        hot_fluid;
+        type        cellZoneSet;
+        action      new;
+        source      setToCellZone;
+        set         hot_fluid;
+    }
+
+    {
+        name        cold_fluid;
+        type        cellZoneSet;
+        action      new;
+        source      setToCellZone;
+        set         cold_fluid;
+    }
+);
+
+// ************************************************************************* //

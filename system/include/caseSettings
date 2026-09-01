@@ -1,0 +1,9 @@
+// Operating conditions — edit these values
+mdotCold        2.0;       // kg/s
+mdotHot         2.0;       // kg/s
+T_cold          300;       // K
+T_hot           353;       // K
+pRef            1e5;       // Pa
+rhoInlet        997;       // kg/m3
+kInlet          0.01;
+epsilonInlet    0.01;

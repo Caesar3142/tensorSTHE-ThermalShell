@@ -1,0 +1,19 @@
+#!/bin/bash
+cd "${0%/*}" || exit                                # Run from this directory
+. ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions        # Tutorial run functions
+#------------------------------------------------------------------------------
+
+# Decompose each region (chtMultiRegionFoam does not use the default mesh)
+for region in $(foamListRegions)
+do
+    runApplication -s "$region" decomposePar -region "$region"
+done
+
+# Foreground: runParallel redirects to a log, so the terminal looks idle
+# and Ctrl-C may not stop mpirun.
+app=$(getApplication)
+nProcs=$(getNumberOfProcessors)
+echo "Running $app ($nProcs processes) on $PWD"
+mpirun --oversubscribe -n "$nProcs" "$app" -parallel
+
+#------------------------------------------------------------------------------
