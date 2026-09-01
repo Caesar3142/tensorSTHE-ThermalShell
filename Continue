@@ -1,0 +1,43 @@
+#!/bin/bash
+cd "${0%/*}" || exit                                # Run from this directory
+. ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions        # Tutorial run functions
+#------------------------------------------------------------------------------
+
+# Resume a parallel job. Do not decompose: that would wipe processor times.
+
+shopt -s nullglob
+procs=(processor*)
+if (( ${#procs[@]} == 0 )); then
+    echo "Error: no processor* directories. Start with ./Run first."
+    exit 1
+fi
+
+nProcs=$(getNumberOfProcessors)
+if (( ${#procs[@]} != nProcs )); then
+    echo "Error: found ${#procs[@]} processor directories, but"
+    echo "       system/decomposeParDict has numberOfSubdomains $nProcs."
+    exit 1
+fi
+
+foamDictionary system/controlDict -entry startFrom -set latestTime
+
+latest=$(foamListTimes -processor -latestTime 2>/dev/null | tail -1)
+endTime=$(foamDictionary -value -entry endTime system/controlDict)
+
+if [ -n "$latest" ] && [ -n "$endTime" ]; then
+    awk -v t="$latest" -v e="$endTime" 'BEGIN {
+        if (t+0 >= e+0) {
+            print "Error: latest processor time " t " is already >= endTime " e "."
+            print "       Increase endTime in system/controlDict, then re-run ./Continue."
+            exit 1
+        }
+    }' || exit 1
+fi
+
+# Foreground: runParallel redirects to a log, so the terminal looks idle
+# and Ctrl-C may not stop mpirun.
+app=$(getApplication)
+echo "Continuing $app ($nProcs processes) from time ${latest:-unknown} on $PWD"
+mpirun --oversubscribe -n "$nProcs" "$app" -parallel
+
+#------------------------------------------------------------------------------

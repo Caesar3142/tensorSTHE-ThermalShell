@@ -1,22 +1,22 @@
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version:  v2406                                 |
+|  \\    /   O peration     | Version:  2412                                  |
 |   \\  /    A nd           | Website:  www.openfoam.com                      |
 |    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 FoamFile
 {
-    version     2.0;
-    format      ascii;
-    class       dictionary;
-    object      controlDict;
+    version         2;
+    format          ascii;
+    class           dictionary;
+    object          controlDict;
 }
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
 application     chtMultiRegionFoam;
 
-startFrom       startTime;
+startFrom       latestTime;
 
 startTime       0;
 
@@ -57,42 +57,41 @@ functions
     outletHotT
     {
         type            surfaceFieldValue;
-        libs            (fieldFunctionObjects);
+        libs            ( fieldFunctionObjects );
         region          hot_fluid;
         regionType      patch;
         name            outlet_hot;
         operation       areaAverage;
-        fields          (T);
+        fields          ( T );
         writeFields     false;
         writeControl    timeStep;
         writeInterval   20;
         log             true;
     }
-
     outletColdT
     {
         type            surfaceFieldValue;
-        libs            (fieldFunctionObjects);
+        libs            ( fieldFunctionObjects );
         region          cold_fluid;
         regionType      patch;
         name            outlet_cold;
         operation       areaAverage;
-        fields          (T);
+        fields          ( T );
         writeFields     false;
         writeControl    timeStep;
         writeInterval   20;
         log             true;
     }
-
     wallHeatFluxHot
     {
         type            wallHeatFlux;
-        libs            (fieldFunctionObjects);
+        libs            ( fieldFunctionObjects );
         region          hot_fluid;
-        patches         (hot_fluid_to_cold_fluid);
+        patches         ( hot_fluid_to_cold_fluid );
         writeControl    writeTime;
         log             true;
     }
 }
+
 
 // ************************************************************************* //

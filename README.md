@@ -77,7 +77,7 @@ system/snappyHexMeshDict
 system/topoSetDict
 system/controlDict
 system/<region>/               fvSchemes, fvSolution, decomposeParDict
-buildMesh  Run  reconstruct  Allclean
+buildMesh  Run  Continue  reconstruct  Allclean
 ```
 
 `0/` is generated from `0.orig/` and is gitignored. Edit `0.orig/`, then copy again (or re-run `buildMesh`).
@@ -89,9 +89,12 @@ Needs an OpenFOAM environment (this repo was run with the `opencfd/openfoam-run`
 ```bash
 ./buildMesh          # mesh + restore 0/ from 0.orig/
 ./Run                # decompose both regions, then chtMultiRegionFoam -parallel
+./Continue           # resume from the latest processor time (does not decompose)
 ./reconstruct        # assemble processor time directories (use after the run)
 ./Allclean           # wipe mesh, 0/, logs, processors
 ```
+
+`./Continue` sets `startFrom latestTime` and launches `mpirun` only. Raise `endTime` in `system/controlDict` first if the previous run already reached it. Do not run `./Run` to resume — it re-decomposes from `0/` and wipes processor times.
 
 `./Run` decomposes **each region** (`decomposePar -region …`). Bare `decomposePar` looks for a default mesh and fails.
 

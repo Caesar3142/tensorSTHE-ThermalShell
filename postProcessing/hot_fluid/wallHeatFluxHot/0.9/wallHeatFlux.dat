@@ -1,0 +1,15 @@
+# Wall heat-flux
+# Time        	patch         	min           	max           	integral      
+0.903226      	hot_fluid_to_cold_fluid	-9.642250e+04	-3.870583e+03	-2.554866e+05
+0.906452      	hot_fluid_to_cold_fluid	-9.629072e+04	-3.869976e+03	-2.547088e+05
+0.909677      	hot_fluid_to_cold_fluid	-9.615938e+04	-3.869374e+03	-2.539398e+05
+0.912903      	hot_fluid_to_cold_fluid	-9.602847e+04	-3.868777e+03	-2.531787e+05
+0.916129      	hot_fluid_to_cold_fluid	-9.589800e+04	-3.868184e+03	-2.524241e+05
+0.919355      	hot_fluid_to_cold_fluid	-9.576794e+04	-3.867596e+03	-2.516758e+05
+0.922581      	hot_fluid_to_cold_fluid	-9.563831e+04	-3.867012e+03	-2.509329e+05
+0.925806      	hot_fluid_to_cold_fluid	-9.550910e+04	-3.866433e+03	-2.501948e+05
+0.929032      	hot_fluid_to_cold_fluid	-9.538031e+04	-3.865858e+03	-2.494617e+05
+0.932258      	hot_fluid_to_cold_fluid	-9.525194e+04	-3.865287e+03	-2.487336e+05
+0.935484      	hot_fluid_to_cold_fluid	-9.512397e+04	-3.864720e+03	-2.480110e+05
+0.93871       	hot_fluid_to_cold_fluid	-9.499642e+04	-3.864157e+03	-2.472941e+05
+0.941935      	hot_fluid_to_cold_fluid	-9.486927e+04	-3.863599e+03	-2.465825e+05
