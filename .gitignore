@@ -1,0 +1,17 @@
+# Time directories (solver results). Keep 0.orig as the IC source.
+/[0-9]*
+!/0.orig/
+!/0.orig/**
+
+# Mesh (background and region meshes)
+**/polyMesh/
+
+# Parallel decomposition
+processor*/
+
+# OpenFOAM application logs
+log.*
+
+# Feature edges from surfaceFeatureExtract
+*.eMesh
+constant/extendedFeatureEdgeMesh/
