@@ -90,7 +90,7 @@ Needs an OpenFOAM environment (this repo was run with the `opencfd/openfoam-run`
 ./buildMesh          # mesh + restore 0/ from 0.orig/
 ./Run                # decompose both regions, then chtMultiRegionFoam -parallel
 ./Continue           # resume from the latest processor time (does not decompose)
-./reconstruct        # assemble new processor times (skips times already reconstructed)
+./reconstruct        # assemble missing processor times (per region)
 ./Allclean           # wipe mesh, 0/, logs, processors
 ```
 
@@ -106,7 +106,7 @@ Processor count is `numberOfSubdomains` in **all three** files (keep them equal)
 
 Current setting: **8** subdomains, method `hierarchical` with `n (2 2 2)` so both regions use the same xyz cuts. Independent `scotch` partitions put mapped twin faces on different ranks and the wall looks adiabatic. `./Run` overwrites previous `log.decomposePar.*`.
 
-`./reconstruct` must also use `-region` (the script does this). It passes `-newTimes`, so it continues from the latest serial time instead of rewriting 0, 0.1, … again.
+`./reconstruct` must also use `-region` (the script does this). It reconstructs only times that are still missing **for that region** (`1/hot_fluid` can lag `1/cold_fluid`). A bare `-newTimes` is wrong here: creating `1/cold_fluid` also creates `1/`, so the next region would skip that time.
 
 Serial solve (after `./buildMesh`):
 

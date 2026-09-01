@@ -1,16 +1,46 @@
-#!/bin/sh
+#!/bin/bash
 cd "${0%/*}" || exit                                # Run from this directory
 . ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions        # Tutorial run functions
 #------------------------------------------------------------------------------
 
 # Must use -region. Bare reconstructPar looks for the default mesh (region0)
-# and fails. -newTimes skips times already on the serial case so a second
-# reconstruct after ./Continue only picks up new processor writes.
-# -o lets you re-run after a Ctrl-C; otherwise runApplication skips a region
-# whose log already exists and later times stay incomplete.
+# and fails.
+#
+# Do not use -newTimes: time dirs live at the case root, shared by all
+# regions. Reconstructing cold_fluid creates 1/, so a later hot_fluid
+# -newTimes skips 1 even when 1/hot_fluid is missing.
+#
+# -o lets you re-run after a Ctrl-C; otherwise runApplication skips a
+# region whose log already exists and later times stay incomplete.
+
+if [ ! -d processor0 ]; then
+    echo "Error: no processor0 directory. Nothing to reconstruct."
+    exit 1
+fi
+
+procTimes=$(foamListTimes -processor)
+if [ -z "$procTimes" ]; then
+    echo "Error: no processor time directories."
+    exit 1
+fi
+
 for region in $(foamListRegions)
 do
-    runApplication -o -s "$region" reconstructPar -region "$region" -newTimes
+    times=""
+    for t in $procTimes
+    do
+        if [ ! -d "$t/$region" ]; then
+            times="${times:+$times,}$t"
+        fi
+    done
+
+    if [ -z "$times" ]; then
+        echo "Region $region: serial times already complete"
+        continue
+    fi
+
+    echo "Region $region: reconstructing times $times"
+    runApplication -o -s "$region" reconstructPar -region "$region" -time "$times"
 done
 
 #------------------------------------------------------------------------------
