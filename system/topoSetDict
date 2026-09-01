@@ -14,9 +14,10 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-// After snappyHexMesh, solid.stl is a baffle (solid / solid_slave).
-// Walking cannot cross those faces, so the two fluids follow the STL
-// rather than a geometric cylinder.
+// After snappyHexMesh, shell.stl and tubes.stl are baffles
+// (shell / shell_slave, tubes / tubes_slave). Walking cannot cross
+// those faces, so the two fluids follow the STLs rather than a
+// geometric cylinder. The enclosure is shell + tubes (old solid.stl).
 
 actions
 (

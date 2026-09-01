@@ -32,7 +32,7 @@ boundaryField
         value           uniform 0;
     }
 
-    "solid.*"
+    "(shell|tubes).*"
     {
         type            nutkWallFunction;
         value           uniform 0;

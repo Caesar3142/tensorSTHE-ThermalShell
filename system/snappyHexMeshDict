@@ -16,14 +16,19 @@ FoamFile
 
 castellatedMesh true;
 snap            true;
-addLayers       false;
+addLayers       true;
 
 geometry
 {
-    solid.stl
+    shell.stl
     {
         type triSurfaceMesh;
-        name solid;
+        name shell;
+    }
+    tubes.stl
+    {
+        type triSurfaceMesh;
+        name tubes;
     }
     inlet_cold.stl
     {
@@ -57,19 +62,30 @@ castellatedMeshControls
 
     features
     (
-        { file "solid.eMesh";       level 2; }
-        { file "inlet_cold.eMesh";  level 2; }
-        { file "outlet_cold.eMesh"; level 2; }
-        { file "inlet_hot.eMesh";   level 2; }
-        { file "outlet_hot.eMesh";  level 2; }
+        { file "shell.eMesh";       level 1; }
+        { file "tubes.eMesh";       level 1; }
+        { file "inlet_cold.eMesh";  level 1; }
+        { file "outlet_cold.eMesh"; level 1; }
+        { file "inlet_hot.eMesh";   level 1; }
+        { file "outlet_hot.eMesh";  level 1; }
     );
 
     refinementSurfaces
     {
-        solid
+        shell
         {
-            level (1 2);
-            faceZone solid;
+            level (0 1);
+            faceZone shell;
+            faceType baffle;
+            patchInfo
+            {
+                type wall;
+            }
+        }
+        tubes
+        {
+            level (1 1);
+            faceZone tubes;
             faceType baffle;
             patchInfo
             {
@@ -78,22 +94,22 @@ castellatedMeshControls
         }
         inlet_cold
         {
-            level (2 2);
+            level (1 1);
             patchInfo { type patch; }
         }
         outlet_cold
         {
-            level (2 2);
+            level (1 1);
             patchInfo { type patch; }
         }
         inlet_hot
         {
-            level (2 2);
+            level (1 1);
             patchInfo { type patch; }
         }
         outlet_hot
         {
-            level (2 2);
+            level (1 1);
             patchInfo { type patch; }
         }
     }
@@ -106,6 +122,7 @@ castellatedMeshControls
 
     // Must sit inside each fluid and off cell faces.
     // hot: tube-side header; cold: shell-side inlet nozzle.
+    // Enclosure is shell.stl + tubes.stl (replaces the old solid.stl).
     locationsInMesh
     (
         ((0.11 0.01 0.01)   hot_fluid)
@@ -130,15 +147,29 @@ snapControls
 addLayersControls
 {
     relativeSizes       true;
+
+    // Prism layers on the tube baffle, both fluids. After snappy these
+    // patches are tubes / tubes_slave; mergeOrSplitBaffles later turns
+    // the coincident faces into the mappedWall interface.
     layers
     {
+        tubes
+        {
+            nSurfaceLayers 3;
+        }
+        tubes_slave
+        {
+            nSurfaceLayers 3;
+        }
     }
+
     expansionRatio      1.2;
-    finalLayerThickness 0.3;
+    finalLayerThickness 0.4;
     minThickness        0.1;
     nGrow               0;
     featureAngle        60;
-    nRelaxIter          3;
+    slipFeatureAngle    30;
+    nRelaxIter          5;
     nSmoothSurfaceNormals 1;
     nSmoothNormals      3;
     nSmoothThickness    10;
@@ -147,6 +178,7 @@ addLayersControls
     minMedialAxisAngle  90;
     nBufferCellsNoExtrude 0;
     nLayerIter          50;
+    nRelaxedIter        20;
 }
 
 meshQualityControls
@@ -166,6 +198,11 @@ meshQualityControls
     minEdgeLength       -1;
     nSmoothScale        4;
     errorReduction      0.75;
+
+    relaxed
+    {
+        maxNonOrtho     75;
+    }
 }
 
 mergeTolerance 1e-6;

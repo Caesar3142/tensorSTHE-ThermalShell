@@ -34,7 +34,7 @@ boundaryField
         value           $internalField;
     }
 
-    "solid.*"
+    "(shell|tubes).*"
     {
         type            fixedFluxPressure;
         value           $internalField;

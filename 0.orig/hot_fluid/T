@@ -35,7 +35,7 @@ boundaryField
         value           uniform $T_hot;
     }
 
-    solid
+    "(shell|tubes).*"
     {
         type            zeroGradient;
     }

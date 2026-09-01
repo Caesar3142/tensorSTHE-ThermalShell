@@ -14,7 +14,15 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-solid.stl
+shell.stl
+{
+    extractionMethod    extractFromSurface;
+    includedAngle       150;
+    geometricTestOnly   no;
+    writeObj            yes;
+}
+
+tubes.stl
 {
     extractionMethod    extractFromSurface;
     includedAngle       150;

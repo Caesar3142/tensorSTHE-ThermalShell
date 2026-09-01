@@ -36,7 +36,7 @@ boundaryField
         value           uniform $epsilonInlet;
     }
 
-    "solid.*"
+    "(shell|tubes).*"
     {
         type            epsilonWallFunction;
         value           uniform $epsilonInlet;

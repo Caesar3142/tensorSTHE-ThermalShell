@@ -11,14 +11,15 @@ runApplication surfaceFeatureExtract
 
 runApplication snappyHexMesh -overwrite
 
-# solid.stl is a baffle. Walk from a seed in each fluid (no geometric
-# cylinder) so the split follows the STL; drop exterior cells, then split.
+# shell.stl + tubes.stl are baffles (replacing the old solid.stl enclosure).
+# Walking cannot cross those faces, so the two fluids follow the STLs.
 runApplication topoSet
-runApplication subsetMesh keepCells -overwrite -patches "(solid)"
+runApplication subsetMesh keepCells -overwrite -patches "(shell tubes)"
 
-# Tube walls are still coincident baffles (solid / solid_slave). Merge those
-# pairs back to internal faces so splitMeshRegions can couple them as
-# mappedWalls. Single-sided faces (shell outer, heads) stay walls.
+# Tube (and any two-sided shell) baffles are still coincident
+# (tubes / tubes_slave). Merge those pairs back to internal faces so
+# splitMeshRegions can couple them as mappedWalls. Single-sided faces
+# (shell outer, heads) stay walls. Prism layers stay in each fluid.
 runApplication mergeOrSplitBaffles -overwrite
 
 runApplication splitMeshRegions -cellZonesOnly -overwrite

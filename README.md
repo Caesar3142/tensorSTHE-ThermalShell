@@ -15,7 +15,7 @@ Default duty: both streams \(2\,\mathrm{kg/s}\) of liquid water, \(T_\mathrm{hot
 
 ### Two fluids, one thin wall
 
-`solid.stl` is snapped as a **baffle**. After `topoSet` / `subsetMesh`, coincident baffle faces are merged back to internal faces (`mergeOrSplitBaffles`), then `splitMeshRegions` splits the mesh into `hot_fluid` and `cold_fluid`. Those coincident faces become a pair of `mappedWall` patches:
+`shell.stl` and `tubes.stl` together are the old `solid.stl` enclosure, snapped as **baffles**. After `topoSet` / `subsetMesh`, coincident baffle faces are merged back to internal faces (`mergeOrSplitBaffles`), then `splitMeshRegions` splits the mesh into `hot_fluid` and `cold_fluid`. Those coincident faces (mainly the tubes) become a pair of `mappedWall` patches:
 
 - `hot_fluid_to_cold_fluid`
 - `cold_fluid_to_hot_fluid`
@@ -23,7 +23,7 @@ Default duty: both streams \(2\,\mathrm{kg/s}\) of liquid water, \(T_\mathrm{hot
 Heat crosses the interface with
 `compressible::turbulentTemperatureRadCoupledMixed` plus a 1-D conduction layer (`thicknessLayers`, `kappaLayers`). That is the “thermal shell”: wall thickness and conductivity set the thermal resistance without resolving a solid mesh.
 
-Remaining single-sided faces from the STL (shell outer wall, heads) stay as the `solid` wall patch and are adiabatic.
+Remaining single-sided faces from `shell.stl` (shell outer wall, heads) stay as the `shell` wall patch and are adiabatic. Prism layers are added on the tube baffle (`tubes` / `tubes_slave`) during snappy, then kept in each fluid after the baffles are merged.
 
 ```
   inlet_hot (x=0)                          outlet_hot (x=2.4 m)
@@ -42,10 +42,10 @@ Remaining single-sided faces from the STL (shell outer wall, heads) stay as the 
 
 1. `blockMesh` — background hex box that fully contains the STLs.
 2. `surfaceFeatureExtract` — feature edges from the STLs in `constant/triSurface/`.
-3. `snappyHexMesh -overwrite` — snap to geometry; `solid.stl` is a baffle `faceZone`.
-4. `topoSet` — walk from a seed in each fluid (baffles stop the walk, so the split follows the STL).
-5. `subsetMesh keepCells` — drop exterior cells; expose the STL as patch `solid`.
-6. `mergeOrSplitBaffles -overwrite` — turn coincident `solid` / `solid_slave` pairs into internal faces.
+3. `snappyHexMesh -overwrite` — snap to `shell.stl` + `tubes.stl` as baffle `faceZone`s; 3 prism layers on `tubes` / `tubes_slave`.
+4. `topoSet` — walk from a seed in each fluid; baffles stop the walk so the split follows `shell.stl` + `tubes.stl`.
+5. `subsetMesh keepCells` — drop exterior cells; expose leftover faces on `shell` / `tubes`.
+6. `mergeOrSplitBaffles -overwrite` — turn coincident `tubes` / `tubes_slave` (and two-sided `shell`) pairs into internal faces.
 7. `splitMeshRegions -cellZonesOnly -overwrite` — create the two region meshes and `mappedWall` coupling.
 8. `restore0Dir` — copy `0.orig/` → `0/` (fields are already set per region; there is no `changeDictionary`).
 
@@ -66,8 +66,8 @@ The same points are in `system/snappyHexMeshDict` (`locationsInMesh`) and `syste
 ## Directory map
 
 ```
-geom/                          CAD export (millimetres) — source STLs
 constant/triSurface/           STLs in metres — what snappy actually reads
+                               (shell.stl, tubes.stl, inlet/outlet STLs)
 constant/<region>/             thermo, turbulence, radiation, region polyMesh
 0.orig/<region>/               initial/boundary fields (edit these)
 0.orig/include/                shared thermal-shell BC
@@ -160,7 +160,7 @@ Several layers are allowed, e.g. metal + fouling: `thicknessLayers (0.002 5e-5);
 | Field | File | Inlet | Wall / mappedWall |
 |-------|------|-------|-------------------|
 | \(U\) | `0.orig/<region>/U` | `flowRateInletVelocity` | `noSlip` |
-| \(T\) | `0.orig/<region>/T` | `fixedValue` | shell couple on `.*_to_.*`; `zeroGradient` on `solid.*` |
+| \(T\) | `0.orig/<region>/T` | `fixedValue` | shell couple on mapped walls; `zeroGradient` on `shell` / leftover `tubes` |
 | \(p_\mathrm{rgh}\) | `0.orig/<region>/p_rgh` | `fixedFluxPressure` | `fixedFluxPressure` |
 | \(k\) | `…/k` | 5% intensity | `kqRWallFunction` |
 | \(\varepsilon\) | `…/epsilon` | mixing length | `epsilonWallFunction` |
@@ -170,7 +170,7 @@ Mixing lengths (≈ 7% of nozzle diameter) live in the epsilon files, not in `ca
 - cold: `0.011` m (~160 mm nozzle)
 - hot: `0.014` m (~200 mm nozzle)
 
-Name `T` patches **exactly** (`hot_fluid_to_cold_fluid`, `cold_fluid_to_hot_fluid`). Do not use a catch-all `".*"` on `T`: it can override the mapped-wall entry and leave the interface `zeroGradient` (adiabatic). Other fields may still use regex (`"solid.*"`, `".*"`). Named inlets/outlets must match the STL names (`inlet_cold`, `outlet_hot`, …).
+Name `T` patches **exactly** for the mapped walls (`hot_fluid_to_cold_fluid`, `cold_fluid_to_hot_fluid`). Do not use a catch-all `".*"` on `T`: it can override the mapped-wall entry and leave the interface `zeroGradient` (adiabatic). Other fields may still use regex (`"(shell|tubes).*"`, `".*"`). Named inlets/outlets must match the STL names (`inlet_cold`, `outlet_hot`, …).
 
 ### Fluid properties
 
@@ -188,22 +188,20 @@ Turbulence model: `constant/<region>/turbulenceProperties`. Radiation is off in 
 
 | File | Role |
 |------|------|
-| `solid.stl` | Wetted envelope: shell outer, tubes, headers. Snapped as a baffle. |
+| `shell.stl` | Outer shell, heads, tube sheets. Baffle like the old `solid.stl`. |
+| `tubes.stl` | Tube-bundle walls. Baffle + 3 prism layers on both sides. |
 | `inlet_hot.stl` / `outlet_hot.stl` | Tube-side openings (patches). |
 | `inlet_cold.stl` / `outlet_cold.stl` | Shell-side nozzle openings (patches). |
 
-**Two copies, two unit systems:**
+**Units:** `constant/triSurface/*.stl` are in **metres**. Snappy, feature extract, and seed points all use this.
 
-- `geom/*.stl` — millimetre CAD export (envelope about \(2400 \times 500 \times 600\,\mathrm{mm}\)).
-- `constant/triSurface/*.stl` — **metres**. Snappy, feature extract, and seed points all use this.
+`./buildMesh` does **not** copy or scale CAD into `triSurface/`. After a CAD change:
 
-`./buildMesh` does **not** copy or scale `geom/` → `triSurface/`. After a CAD change:
-
-1. Export the five named STLs.
+1. Export `shell.stl`, `tubes.stl`, and the four opening STLs.
 2. Scale millimetres → metres (divide coordinates by 1000) into `constant/triSurface/`.
 3. Keep the same file names, or update `snappyHexMeshDict` and `surfaceFeatureExtractDict` together.
 
-Inlets/outlets must lie on the `solid.stl` surface (same plane, same outline) so snappy can cut patches out of the wall.
+Inlets/outlets must lie on `shell.stl` (same plane, same outline) so snappy can cut patches out of the wall. The fluid volume previously inside `solid.stl` is now inside `shell.stl` + `tubes.stl`.
 
 ### Bounding box
 
@@ -230,9 +228,9 @@ Pick a point clearly inside the tube header for hot, and clearly inside the shel
 
 `system/snappyHexMeshDict`:
 
-- `features` / `refinementSurfaces` levels (currently 1–2 on `solid`, 2 on inlets/outlets)
+- `features` / `refinementSurfaces` levels (currently 1–2 on `shell`, 2 on `tubes` and inlets/outlets)
 - `maxGlobalCells`
-- `addLayers` is off
+- Prism layers: `addLayers true`, 3 layers on `tubes` and `tubes_slave`
 
 Feature-edge extraction: `system/surfaceFeatureExtractDict` (`includedAngle 150`).
 
@@ -252,10 +250,10 @@ Feature-edge extraction: `system/surfaceFeatureExtractDict` (`includedAngle 150`
 | Region | Patch | Type |
 |--------|--------|------|
 | `cold_fluid` | `inlet_cold`, `outlet_cold` | `patch` |
-| `cold_fluid` | `solid` | `wall` (outer shell / heads) |
+| `cold_fluid` | `shell` | `wall` (outer shell / heads) |
 | `cold_fluid` | `cold_fluid_to_hot_fluid` | `mappedWall` → hot |
 | `hot_fluid` | `inlet_hot`, `outlet_hot` | `patch` |
-| `hot_fluid` | `solid` | `wall` (headers / unused STL faces) |
+| `hot_fluid` | `shell` | `wall` (headers / unused STL faces) |
 | `hot_fluid` | `hot_fluid_to_cold_fluid` | `mappedWall` → cold |
 
 ## Notes
