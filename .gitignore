@@ -3,15 +3,13 @@
 !/0.orig/
 !/0.orig/**
 
-# Mesh (background and region meshes)
 **/polyMesh/
 
-# Parallel decomposition
 processor*/
 
-# OpenFOAM application logs
 log.*
 
-# Feature edges from surfaceFeatureExtract
 *.eMesh
 constant/extendedFeatureEdgeMesh/
+
+postProcessing/
