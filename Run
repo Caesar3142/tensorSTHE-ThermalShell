@@ -3,10 +3,12 @@ cd "${0%/*}" || exit                                # Run from this directory
 . ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions        # Tutorial run functions
 #------------------------------------------------------------------------------
 
-# Decompose each region (chtMultiRegionFoam does not use the default mesh)
+# Decompose each region (chtMultiRegionFoam does not use the default mesh).
+# Use the same hierarchical cuts in every region decomposeParDict so
+# mappedWall twins stay on the same rank.
 for region in $(foamListRegions)
 do
-    runApplication -s "$region" decomposePar -region "$region"
+    runApplication -o -s "$region" decomposePar -region "$region"
 done
 
 # Foreground: runParallel redirects to a log, so the terminal looks idle

@@ -35,19 +35,20 @@ boundaryField
         value           uniform $T_hot;
     }
 
-    "solid.*"
+    solid
     {
         type            zeroGradient;
     }
 
-    ".*_to_.*"
+    // Exact name required. A catch-all ".*" can steal this patch and
+    // make the interface adiabatic (zeroGradient).
+    hot_fluid_to_cold_fluid
     {
         #include        "../include/thermalShellCoupled"
-    }
 
-    ".*"
-    {
-        type            zeroGradient;
+        // Wall resistance on ONE side only.
+        thicknessLayers (0.002);   // thermal shell thickness [m]
+        kappaLayers     (16);      // stainless steel [W/m/K]
     }
 }
 

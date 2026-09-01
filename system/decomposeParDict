@@ -16,6 +16,16 @@ FoamFile
 
 numberOfSubdomains 8;
 
-method          scotch;
+// Same xyz cuts on every region so mapped twin faces stay on the same
+// rank. Independent scotch partitions put hot/cold twins on different
+// processors; the mapped T neighbour then looks adiabatic.
+method          hierarchical;
+
+hierarchicalCoeffs
+{
+    n               (2 2 2);
+    delta           0.001;
+    order           xyz;
+}
 
 // ************************************************************************* //

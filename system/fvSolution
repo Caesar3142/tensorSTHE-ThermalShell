@@ -19,7 +19,10 @@ FoamFile
 
 PIMPLE
 {
-    nOuterCorrectors    1;
+    // Outer loops exchange T across mappedWalls each time step.
+    // 1 leaves the neighbour temperature a full step stale and can
+    // starve the thermal-shell flux.
+    nOuterCorrectors    5;
     nCorrectors         2;
     nNonOrthogonalCorrectors 1;
 }

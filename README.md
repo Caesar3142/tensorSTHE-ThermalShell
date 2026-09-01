@@ -60,7 +60,8 @@ The same points are in `system/snappyHexMeshDict` (`locationsInMesh`) and `syste
 
 - Incompressible liquid (`heRhoThermo` + `rhoConst`) with constant \(\mu\), \(C_p\), Pr. Both regions default to water at ~300 K.
 - RAS `kEpsilon`, radiation off, gravity `(0 -9.81 0)`.
-- Transient PIMPLE, adjustable \(\Delta t\) with `maxCo 0.5`, `endTime 50`.
+- Transient PIMPLE (`nOuterCorrectors 5` so mapped T is iterated each step), adjustable \(\Delta t\) with `maxCo 0.5`. `endTime` is in `system/controlDict`.
+- Outlet area-average \(T\) and interface `wallHeatFlux` are logged from `controlDict` function objects.
 
 ## Directory map
 
@@ -100,7 +101,7 @@ Processor count is `numberOfSubdomains` in **all three** files (keep them equal)
 - `system/hot_fluid/decomposeParDict`
 - `system/cold_fluid/decomposeParDict`
 
-Current setting: **8** subdomains, method `scotch`. If `log.decomposePar.*` already exists, `./Run` skips decompose. Remove those logs (and `processor*`) to re-decompose.
+Current setting: **8** subdomains, method `hierarchical` with `n (2 2 2)` so both regions use the same xyz cuts. Independent `scotch` partitions put mapped twin faces on different ranks and the wall looks adiabatic. `./Run` overwrites previous `log.decomposePar.*`.
 
 `./reconstruct` must also use `-region` (the script does this).
 
@@ -140,10 +141,11 @@ If processors already exist, re-decompose (or copy fields into `processor*/0/`).
 
 ### Thermal shell (wall thickness and conductivity)
 
-`0.orig/include/thermalShellCoupled` is included on every `.*_to_.*` patch in `T`:
+`0.orig/include/thermalShellCoupled` is the mapped mixed-T coupling (`compressible::turbulentTemperatureRadCoupledMixed`).
+
+Put `thicknessLayers` / `kappaLayers` on **one region only** (here `0.orig/hot_fluid/T`). The same lists on both fluids stack two shells in series and cut the flux in half.
 
 ```
-type            compressible::turbulentTemperatureRadCoupledMixed;
 thicknessLayers (0.002);   // m
 kappaLayers     (16);      // W/m/K  (stainless steel)
 ```
@@ -165,7 +167,7 @@ Mixing lengths (≈ 7% of nozzle diameter) live in the epsilon files, not in `ca
 - cold: `0.011` m (~160 mm nozzle)
 - hot: `0.014` m (~200 mm nozzle)
 
-Patch names are regex-matched (`"solid.*"`, `".*_to_.*"`, `".*"`) so they survive snappy’s extra wall names. Named inlets/outlets must match the STL names (`inlet_cold`, `outlet_hot`, …).
+Name `T` patches **exactly** (`hot_fluid_to_cold_fluid`, `cold_fluid_to_hot_fluid`). Do not use a catch-all `".*"` on `T`: it can override the mapped-wall entry and leave the interface `zeroGradient` (adiabatic). Other fields may still use regex (`"solid.*"`, `".*"`). Named inlets/outlets must match the STL names (`inlet_cold`, `outlet_hot`, …).
 
 ### Fluid properties
 

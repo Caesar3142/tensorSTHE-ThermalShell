@@ -35,19 +35,15 @@ boundaryField
         value           uniform $T_cold;
     }
 
-    "solid.*"
+    solid
     {
         type            zeroGradient;
     }
 
-    ".*_to_.*"
+    // Exact name required. Thickness/kappa of the metal are on the hot side.
+    cold_fluid_to_hot_fluid
     {
         #include        "../include/thermalShellCoupled"
-    }
-
-    ".*"
-    {
-        type            zeroGradient;
     }
 }
 

@@ -52,4 +52,47 @@ maxDi           10;
 
 maxDeltaT       0.1;
 
+functions
+{
+    outletHotT
+    {
+        type            surfaceFieldValue;
+        libs            (fieldFunctionObjects);
+        region          hot_fluid;
+        regionType      patch;
+        name            outlet_hot;
+        operation       areaAverage;
+        fields          (T);
+        writeFields     false;
+        writeControl    timeStep;
+        writeInterval   20;
+        log             true;
+    }
+
+    outletColdT
+    {
+        type            surfaceFieldValue;
+        libs            (fieldFunctionObjects);
+        region          cold_fluid;
+        regionType      patch;
+        name            outlet_cold;
+        operation       areaAverage;
+        fields          (T);
+        writeFields     false;
+        writeControl    timeStep;
+        writeInterval   20;
+        log             true;
+    }
+
+    wallHeatFluxHot
+    {
+        type            wallHeatFlux;
+        libs            (fieldFunctionObjects);
+        region          hot_fluid;
+        patches         (hot_fluid_to_cold_fluid);
+        writeControl    writeTime;
+        log             true;
+    }
+}
+
 // ************************************************************************* //

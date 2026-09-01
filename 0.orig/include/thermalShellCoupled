@@ -3,6 +3,4 @@ Tnbr            T;
 kappaMethod     fluidThermo;
 qr              none;
 qrNbr           none;
-thicknessLayers (0.002);   // thermal shell thickness [m]
-kappaLayers     (16);      // stainless steel [W/m/K]
 value           uniform 300;
