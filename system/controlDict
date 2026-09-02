@@ -22,7 +22,6 @@ startTime       0;
 
 stopAt          endTime;
 
-// Pseudo-time iterations (not physical seconds).
 endTime         500;
 
 deltaT          1;

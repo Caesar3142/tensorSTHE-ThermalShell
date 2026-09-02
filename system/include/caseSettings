@@ -1,6 +1,6 @@
 // Operating conditions — edit these values
-mdotCold        5.0;       // kg/s
-mdotHot         5.0;       // kg/s
+mdotCold        25.0;       // kg/s
+mdotHot         25.0;       // kg/s
 T_cold          300;       // K
 T_hot           353;       // K
 pRef            1e5;       // Pa

@@ -3,12 +3,37 @@ cd "${0%/*}" || exit                                # Run from this directory
 . ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions        # Tutorial run functions
 #------------------------------------------------------------------------------
 
+# Refresh 0/ from 0.orig, bake caseSettings into numeric BCs, push to processors.
+restore0Dir
+./applyCaseSettings
+
+foamDictionary system/controlDict -entry startFrom -set startTime
+foamDictionary system/controlDict -entry startTime -set 0
+
+# Drop old iteration folders; keep processor*/0 and processor*/constant (mesh).
+shopt -s nullglob
+for proc in processor*; do
+    for tdir in "$proc"/*; do
+        [ -d "$tdir" ] || continue
+        tname=$(basename "$tdir")
+        [[ "$tname" =~ ^[0-9]+$ ]] || continue
+        [ "$tname" = "0" ] && continue
+        rm -rf "$tdir"
+    done
+done
+
 # Decompose each region (multi-region CHT does not use the default mesh).
 # Use the same hierarchical cuts in every region decomposeParDict so
 # mappedWall twins stay on the same rank.
+shopt -s nullglob
+procs=(processor*)
 for region in $(foamListRegions)
 do
-    runApplication -o -s "$region" decomposePar -region "$region"
+    if (( ${#procs[@]} == 0 )); then
+        runApplication -o -s "$region" decomposePar -region "$region"
+    else
+        runApplication -o -s "$region" decomposePar -region "$region" -fields -time 0
+    fi
 done
 
 # Foreground: runParallel redirects to a log, so the terminal looks idle
