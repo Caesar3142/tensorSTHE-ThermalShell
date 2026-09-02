@@ -13,3 +13,6 @@ log.*
 constant/extendedFeatureEdgeMesh/
 
 postProcessing/
+
+residuals.html
+.plotResiduals.pid

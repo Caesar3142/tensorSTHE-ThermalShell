@@ -3,15 +3,18 @@ cd "${0%/*}" || exit                                # Run from this directory
 . ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions        # Tutorial run functions
 #------------------------------------------------------------------------------
 
-# Must use -region. Bare reconstructPar looks for the default mesh (region0)
-# and fails.
+# Must use -region / -allRegions. Bare reconstructPar looks for the default
+# mesh (region0) and fails.
 #
-# Do not use -newTimes: time dirs live at the case root, shared by all
-# regions. Reconstructing cold_fluid creates 1/, so a later hot_fluid
-# -newTimes skips 1 even when 1/hot_fluid is missing.
+# Reconstruct both regions at each time (-allRegions), not all times of
+# cold_fluid and then all times of hot_fluid. The latter leaves ParaView
+# with a full cold series and almost no hot_fluid if you Ctrl-C.
 #
-# -o lets you re-run after a Ctrl-C; otherwise runApplication skips a
-# region whose log already exists and later times stay incomplete.
+# A time directory can exist but still be incomplete (Ctrl-C mid-write).
+# Require T, U and phi before treating a region time as done.
+#
+# Do not use -newTimes: creating 1/cold_fluid also creates 1/, so a later
+# region would skip that time even when 1/hot_fluid is missing.
 
 if [ ! -d processor0 ]; then
     echo "Error: no processor0 directory. Nothing to reconstruct."
@@ -24,23 +27,72 @@ if [ -z "$procTimes" ]; then
     exit 1
 fi
 
-for region in $(foamListRegions)
-do
-    times=""
-    for t in $procTimes
+complete_region_time()
+{
+    local t=$1 region=$2
+    [ -f "$t/$region/T" ] && [ -f "$t/$region/U" ] && [ -f "$t/$region/phi" ]
+}
+
+need_time()
+{
+    local t=$1 region
+    for region in $(foamListRegions)
     do
-        if [ ! -d "$t/$region" ]; then
-            times="${times:+$times,}$t"
+        if ! complete_region_time "$t" "$region"; then
+            return 0
         fi
     done
+    return 1
+}
 
-    if [ -z "$times" ]; then
-        echo "Region $region: serial times already complete"
-        continue
+times=()
+for t in $procTimes
+do
+    if need_time "$t"; then
+        times+=("$t")
     fi
-
-    echo "Region $region: reconstructing times $times"
-    runApplication -o -s "$region" reconstructPar -region "$region" -time "$times"
 done
+
+if [ ${#times[@]} -eq 0 ]; then
+    echo "All region times already complete."
+    exit 0
+fi
+
+echo "Reconstructing ${#times[@]} times for all regions (hot and cold together)."
+echo "Times: ${times[*]}"
+echo "Re-run ./reconstruct if this is interrupted; incomplete times are retried."
+
+: > log.reconstructPar
+trap 'echo; echo "Interrupted. Re-run ./reconstruct to finish remaining times."; exit 130' INT
+set -o pipefail
+
+# Small batches so a Ctrl-C loses at most a few times, not the whole list.
+chunkSize=10
+n=${#times[@]}
+i=0
+while [ "$i" -lt "$n" ]
+do
+    end=$((i + chunkSize))
+    [ "$end" -gt "$n" ] && end=$n
+    chunk=""
+    j=$i
+    while [ "$j" -lt "$end" ]
+    do
+        chunk="${chunk:+$chunk,}${times[j]}"
+        j=$((j + 1))
+    done
+
+    echo "=== times ${times[i]} .. ${times[end-1]} ==="
+    reconstructPar -allRegions -time "$chunk" 2>&1 | tee -a log.reconstructPar
+    status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "Error: reconstructPar failed on times $chunk (exit $status)."
+        echo "Re-run ./reconstruct to continue."
+        exit "$status"
+    fi
+    i=$end
+done
+
+echo "Reconstruction complete."
 
 #------------------------------------------------------------------------------

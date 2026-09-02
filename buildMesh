@@ -11,15 +11,14 @@ runApplication surfaceFeatureExtract
 
 runApplication snappyHexMesh -overwrite
 
-# shell.stl + tubes.stl are baffles (replacing the old solid.stl enclosure).
-# Walking cannot cross those faces, so the two fluids follow the STLs.
+# solid.stl is a baffle. Walk from a seed in each fluid (no geometric
+# cylinder) so the split follows the STL; drop exterior cells, then split.
 runApplication topoSet
-runApplication subsetMesh keepCells -overwrite -patches "(shell tubes)"
+runApplication subsetMesh keepCells -overwrite -patches "(solid)"
 
-# Tube (and any two-sided shell) baffles are still coincident
-# (tubes / tubes_slave). Merge those pairs back to internal faces so
-# splitMeshRegions can couple them as mappedWalls. Single-sided faces
-# (shell outer, heads) stay walls. Prism layers stay in each fluid.
+# Tube walls are still coincident baffles (solid / solid_slave). Merge those
+# pairs back to internal faces so splitMeshRegions can couple them as
+# mappedWalls. Single-sided faces (shell outer, heads) stay walls.
 runApplication mergeOrSplitBaffles -overwrite
 
 runApplication splitMeshRegions -cellZonesOnly -overwrite
@@ -31,6 +30,16 @@ then
     echo "Check log.topoSet, log.subsetMesh and log.splitMeshRegions."
     exit 1
 fi
+
+echo "Region patches (heat crosses only *_to_* mappedWalls):"
+for region in hot_fluid cold_fluid
+do
+    echo "  $region"
+    awk '
+        /^    [A-Za-z0-9_]+$/ { name = $1 }
+        /nFaces/ { printf "    %-32s nFaces %s\n", name, $2 }
+    ' "constant/$region/polyMesh/boundary"
+done
 
 # Fields are already set per region in 0.orig (no changeDictionary).
 restore0Dir

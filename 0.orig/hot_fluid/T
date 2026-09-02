@@ -30,12 +30,10 @@ boundaryField
 
     outlet_hot
     {
-        type            inletOutlet;
-        inletValue      uniform $T_hot;
-        value           uniform $T_hot;
+        type            zeroGradient;
     }
 
-    "(shell|tubes).*"
+    solid
     {
         type            zeroGradient;
     }
@@ -45,10 +43,7 @@ boundaryField
     hot_fluid_to_cold_fluid
     {
         #include        "../include/thermalShellCoupled"
-
-        // Wall resistance on ONE side only.
-        thicknessLayers (0.002);   // thermal shell thickness [m]
-        kappaLayers     (16);      // stainless steel [W/m/K]
+        value           $internalField;
     }
 }
 

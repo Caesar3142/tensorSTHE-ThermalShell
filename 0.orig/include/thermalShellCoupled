@@ -3,4 +3,10 @@ Tnbr            T;
 kappaMethod     fluidThermo;
 qr              none;
 qrNbr           none;
-value           uniform 300;
+
+// No thicknessLayers / kappaLayers: turbulent kappaEff on both fluids
+// couples directly across the mappedWall (strongest heat transfer).
+// To add a thin metal resistance, uncomment in caseSettings and add:
+//   thicknessLayers ($wallThickness);
+//   kappaLayers     ($wallKappa);
+// on BOTH mapped walls (same lists in this include).

@@ -30,20 +30,19 @@ boundaryField
 
     outlet_cold
     {
-        type            inletOutlet;
-        inletValue      uniform $T_cold;
-        value           uniform $T_cold;
+        type            zeroGradient;
     }
 
-    "(shell|tubes).*"
+    solid
     {
         type            zeroGradient;
     }
 
-    // Exact name required. Thickness/kappa of the metal are on the hot side.
+    // Exact name required. Same thermal shell as the hot mapped wall.
     cold_fluid_to_hot_fluid
     {
         #include        "../include/thermalShellCoupled"
+        value           $internalField;
     }
 }
 

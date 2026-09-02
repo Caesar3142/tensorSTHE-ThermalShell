@@ -37,7 +37,7 @@ boundaryField
         value           uniform (0 0 0);
     }
 
-    "(shell|tubes).*"
+    solid
     {
         type            noSlip;
     }

@@ -1,0 +1,690 @@
+#!/bin/bash
+# Live residual plot for chtMultiRegion{Simple,F}oam. Bash + awk only (no Python),
+# so this works in the OpenFOAM Docker image, macOS, and Windows Git Bash.
+#
+#   ./plotResiduals --open
+#
+cd "${0%/*}" || exit
+
+usage() {
+    cat <<'EOF'
+Usage: ./plotResiduals [--open] [--once] [log]
+
+Reads an OpenFOAM solver log and writes residuals.html (log-scale plot
+vs iteration or time). Re-open that file in any browser on Mac or Windows.
+
+  ./plotResiduals --open              watch log.<application>
+  ./plotResiduals --open log.foo      watch a specific log
+  ./plotResiduals --once              write residuals.html and exit
+EOF
+}
+
+if [ -f system/controlDict ]; then
+    app=$(foamDictionary -value -entry application system/controlDict 2>/dev/null \
+        || grep -E '^application[[:space:]]' system/controlDict \
+        | awk '{print $2}' | tr -d ';')
+fi
+log="log.${app:-chtMultiRegionSimpleFoam}"
+do_open=0
+once=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help) usage; exit 0 ;;
+        --open) do_open=1 ;;
+        --no-open) do_open=0 ;;
+        --once) once=1 ;;
+        --log) log=$2; shift ;;
+        --log=*) log=${1#*=} ;;
+        --port|--port=*) ;; # ignored; kept so old invocations still work
+        -*) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+        *) log=$1 ;;
+    esac
+    shift
+done
+
+html="$PWD/residuals.html"
+pidfile="$PWD/.plotResiduals.pid"
+
+setting() {
+    awk -v key="$1" -v def="$2" '
+        $1 == key {
+            v = $2
+            gsub(/;/, "", v)
+            print v
+            found = 1
+            exit
+        }
+        END { if (!found) print def }
+    ' system/include/caseSettings 2>/dev/null
+}
+
+parse_log() {
+    # Portable awk (mawk/nawk/gawk): first Initial residual per
+    # (time step, region, field). Skips rho. Also outlet T and |mdot|.
+    local src=$1
+    local files=()
+    [ -f "$src" ] && files+=("$src")
+    if [ -d postProcessing ]; then
+        while IFS= read -r f; do
+            [ -n "$f" ] && files+=("$f")
+        done < <(find postProcessing -name surfaceFieldValue.dat 2>/dev/null)
+    fi
+    if [ ${#files[@]} -eq 0 ]; then
+        printf '%s\n' '{"log":"","time":[],"step":[],"regions":{},"latestTime":null,"nSteps":0,"outlets":{"T_hot":{"t":[],"v":[]},"T_cold":{"t":[],"v":[]},"mdot_hot":{"t":[],"v":[]},"mdot_cold":{"t":[],"v":[]}},"targets":{}}'
+        return
+    fi
+    awk -v logname="$(basename "$src")" \
+        -v mdotHot="$(setting mdotHot 2.0)" \
+        -v mdotCold="$(setting mdotCold 2.0)" \
+        -v T_hot="$(setting T_hot 353)" \
+        -v T_cold="$(setting T_cold 300)" '
+    BEGIN { n = 0; current = ""; nreg = 0; fo = ""; curT = "" }
+    function rec_out(kind, stream, t, val,    k, i) {
+        if (t == "") return
+        val = val + 0
+        if (kind == "mdot" && val < 0) val = -val
+        k = kind SUBSEP stream
+        for (i = 1; i <= nout[k]; i++) {
+            if (out_t[k, i] == t) { out_v[k, i] = val; return }
+        }
+        nout[k]++
+        out_t[k, nout[k]] = t
+        out_v[k, nout[k]] = val
+    }
+    function emit_out(kind, stream,    k, nser, i, j, ti, vi) {
+        k = kind SUBSEP stream
+        nser = nout[k] + 0
+        for (i = 1; i <= nser; i++)
+            for (j = i + 1; j <= nser; j++)
+                if (out_t[k, j] + 0 < out_t[k, i] + 0) {
+                    ti = out_t[k, i]; out_t[k, i] = out_t[k, j]; out_t[k, j] = ti
+                    vi = out_v[k, i]; out_v[k, i] = out_v[k, j]; out_v[k, j] = vi
+                }
+        printf "\"t\":["
+        for (i = 1; i <= nser; i++) {
+            if (i > 1) printf ","
+            printf "%s", out_t[k, i]
+        }
+        printf "],\"v\":["
+        for (i = 1; i <= nser; i++) {
+            if (i > 1) printf ","
+            printf "%s", out_v[k, i]
+        }
+        printf "]"
+    }
+    FILENAME ~ /surfaceFieldValue/ {
+        if ($0 ~ /^#/ || NF < 2) next
+        if (FILENAME ~ /outletHotT/) rec_out("T", "hot", $1, $2)
+        else if (FILENAME ~ /outletColdT/) rec_out("T", "cold", $1, $2)
+        else if (FILENAME ~ /outletHotMdot/) rec_out("mdot", "hot", $1, $2)
+        else if (FILENAME ~ /outletColdMdot/) rec_out("mdot", "cold", $1, $2)
+        next
+    }
+    /^Time[[:space:]]*=/ {
+        n++
+        t = $0
+        sub(/^[^=]*=[[:space:]]*/, "", t)
+        sub(/[[:space:]].*/, "", t)
+        times[n] = t
+        curT = t
+        next
+    }
+    /Solving for fluid region/ {
+        current = $NF
+        if (!(current in seenreg)) {
+            seenreg[current] = ++nreg
+            regname[nreg] = current
+        }
+        next
+    }
+    /time step continuity errors \(/ {
+        s = $0
+        sub(/.*time step continuity errors \(/, "", s)
+        sub(/\).*/, "", s)
+        current = s
+        if (current != "" && !(current in seenreg)) {
+            seenreg[current] = ++nreg
+            regname[nreg] = current
+        }
+        next
+    }
+    /Solving for / && /Initial residual =/ {
+        if (n == 0 || current == "") next
+        s = $0
+        sub(/.*Solving for /, "", s)
+        field = s
+        sub(/,.*/, "", field)
+        if (field == "rho" || field == "rhoFinal") next
+        sub(/.*Initial residual = /, "", s)
+        sub(/,.*/, "", s)
+        key = n SUBSEP current SUBSEP field
+        if (key in resid) next
+        resid[key] = s
+        fk = current SUBSEP field
+        if (!(fk in seenfld)) {
+            seenfld[fk] = 1
+            nfields[current]++
+            fieldname[current, nfields[current]] = field
+        }
+        next
+    }
+    /surfaceFieldValue/ && /write:/ {
+        fo = $2
+        next
+    }
+    /areaAverage/ && / of T/ {
+        val = $NF
+        if (fo == "outletHotT") rec_out("T", "hot", curT, val)
+        else if (fo == "outletColdT") rec_out("T", "cold", curT, val)
+        next
+    }
+    / of phi/ {
+        val = $NF
+        if (fo == "outletHotMdot") rec_out("mdot", "hot", curT, val)
+        else if (fo == "outletColdMdot") rec_out("mdot", "cold", curT, val)
+        next
+    }
+    END {
+        printf "{\"log\":\"%s\",\"time\":[", logname
+        for (i = 1; i <= n; i++) {
+            if (i > 1) printf ","
+            printf "%s", times[i]
+        }
+        printf "],\"step\":["
+        for (i = 1; i <= n; i++) {
+            if (i > 1) printf ","
+            printf "%d", i
+        }
+        printf "],\"regions\":{"
+        for (r = 1; r <= nreg; r++) {
+            name = regname[r]
+            if (r > 1) printf ","
+            printf "\"%s\":{", name
+            nf = nfields[name] + 0
+            for (f = 1; f <= nf; f++) {
+                fld = fieldname[name, f]
+                if (f > 1) printf ","
+                printf "\"%s\":[", fld
+                for (i = 1; i <= n; i++) {
+                    if (i > 1) printf ","
+                    k = i SUBSEP name SUBSEP fld
+                    if (k in resid) printf "%s", resid[k]
+                    else printf "null"
+                }
+                printf "]"
+            }
+            printf "}"
+        }
+        printf "},\"latestTime\":"
+        if (n) printf "%s", times[n]
+        else printf "null"
+        printf ",\"nSteps\":%d", n
+        printf ",\"outlets\":{"
+        printf "\"T_hot\":{"; emit_out("T", "hot"); printf "}"
+        printf ",\"T_cold\":{"; emit_out("T", "cold"); printf "}"
+        printf ",\"mdot_hot\":{"; emit_out("mdot", "hot"); printf "}"
+        printf ",\"mdot_cold\":{"; emit_out("mdot", "cold"); printf "}"
+        printf "}"
+        printf ",\"targets\":{\"mdotHot\":%s,\"mdotCold\":%s,\"T_hot\":%s,\"T_cold\":%s}", mdotHot, mdotCold, T_hot, T_cold
+        printf "}\n"
+    }
+    ' "${files[@]}"
+}
+
+write_plot() {
+    local src=$1 dest=$2 json
+    if [ -f "$src" ]; then
+        json=$(parse_log "$src")
+    fi
+    [ -n "$json" ] || json='{"log":"","time":[],"step":[],"regions":{},"latestTime":null,"nSteps":0}'
+
+    {
+        cat <<'HEAD'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="2">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solver monitor</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: ui-sans-serif, system-ui, Segoe UI, Helvetica, Arial, sans-serif;
+    background: #111318; color: #e8eaed;
+  }
+  header {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.6rem 1.2rem;
+    padding: 0.85rem 1.2rem; border-bottom: 1px solid #2a2f3a;
+    background: #181b22;
+  }
+  h1 { font-size: 1.05rem; font-weight: 600; margin: 0; }
+  .meta { color: #9aa0a6; font-size: 0.85rem; }
+  .meta b { color: #e8eaed; font-weight: 600; }
+  .toggle { display: flex; gap: 0.75rem; font-size: 0.85rem; color: #c4c7ce; }
+  .toggle label { cursor: pointer; user-select: none; }
+  main { padding: 0.6rem 0.8rem 1rem; }
+  .panel {
+    background: #181b22; border: 1px solid #2a2f3a; border-radius: 8px;
+    margin: 0.6rem 0; padding: 0.4rem 0.5rem 0.2rem;
+  }
+  .panel h2 {
+    margin: 0.2rem 0.4rem 0; font-size: 0.9rem; font-weight: 600; color: #c4c7ce;
+  }
+  canvas { width: 100%; height: 280px; display: block; cursor: crosshair; }
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 0.35rem 0.9rem;
+    padding: 0.25rem 0.5rem 0.45rem; font-size: 0.78rem; color: #c4c7ce;
+  }
+  .legend i {
+    display: inline-block; width: 12px; height: 3px; margin-right: 0.35rem;
+    vertical-align: middle; border-radius: 1px;
+  }
+  #tip {
+    position: fixed; pointer-events: none; display: none;
+    background: #0d0f14; border: 1px solid #3a4050; border-radius: 6px;
+    padding: 0.4rem 0.55rem; font-size: 0.78rem; z-index: 5;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+  }
+  .empty { padding: 3rem 1rem; text-align: center; color: #9aa0a6; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Solver monitor</h1>
+  <div class="meta">
+    step <b id="nSteps">0</b>
+    &middot; time <b id="latest">—</b>
+    &middot; <span id="logName">log</span>
+  </div>
+  <div class="toggle">
+    <label><input type="radio" name="xaxis" value="step"> Iteration</label>
+    <label><input type="radio" name="xaxis" value="time"> Time [s]</label>
+  </div>
+</header>
+<div id="tip"></div>
+<main id="main"><div class="empty" id="empty">Waiting for solver output…</div></main>
+<script>
+HEAD
+        printf 'const DATA = %s;\n' "$json"
+        cat <<'TAIL'
+const COLORS = {
+  p_rgh: "#e74c3c", Ux: "#3b82f6", Uy: "#22c55e", Uz: "#a855f7",
+  h: "#f59e0b", k: "#14b8a6", epsilon: "#eab308"
+};
+const ORDER = ["p_rgh","Ux","Uy","Uz","h","k","epsilon"];
+const OUT_COLORS = { hot: "#e74c3c", cold: "#3b82f6" };
+let data = DATA;
+let xMode = sessionStorage.getItem("xMode") || "step";
+
+document.querySelectorAll('input[name="xaxis"]').forEach(el => {
+  el.checked = (el.value === xMode);
+  el.addEventListener("change", () => {
+    xMode = el.value;
+    sessionStorage.setItem("xMode", xMode);
+    render();
+  });
+});
+
+function xValues() {
+  return xMode === "time" ? data.time : data.step;
+}
+
+function yToY(v, logMin, logMax, y0, h) {
+  if (!(v > 0)) return null;
+  const t = (Math.log10(v) - logMin) / Math.max(logMax - logMin, 1e-12);
+  return y0 + h * (1 - t);
+}
+
+function yToYlin(v, yMin, yMax, y0, h) {
+  if (v == null || !isFinite(v)) return null;
+  return y0 + h * (1 - (v - yMin) / Math.max(yMax - yMin, 1e-30));
+}
+
+function logBounds(regions) {
+  let min = Infinity, max = -Infinity;
+  for (const series of Object.values(regions || {})) {
+    for (const vals of Object.values(series)) {
+      for (const v of vals) {
+        if (v > 0) { min = Math.min(min, v); max = Math.max(max, v); }
+      }
+    }
+  }
+  if (!isFinite(min)) return { logMin: -12, logMax: 0 };
+  let logMin = Math.floor(Math.log10(min));
+  let logMax = Math.ceil(Math.log10(max));
+  if (logMin === logMax) { logMin -= 1; logMax += 1; }
+  return { logMin, logMax };
+}
+
+function linBounds(seriesList, refs) {
+  let min = Infinity, max = -Infinity;
+  for (const s of seriesList) {
+    for (const v of (s.v || [])) {
+      if (v == null || !isFinite(v)) continue;
+      min = Math.min(min, v);
+      max = Math.max(max, v);
+    }
+  }
+  for (const r of (refs || [])) {
+    if (r.y == null || !isFinite(r.y)) continue;
+    min = Math.min(min, r.y);
+    max = Math.max(max, r.y);
+  }
+  if (!isFinite(min)) return { yMin: 0, yMax: 1 };
+  if (min === max) {
+    const pad = Math.max(Math.abs(min) * 0.05, 0.05);
+    return { yMin: min - pad, yMax: max + pad };
+  }
+  const span = max - min;
+  return { yMin: min - 0.08 * span, yMax: max + 0.08 * span };
+}
+
+function setupCanvas(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth, cssH = canvas.clientHeight;
+  canvas.width = Math.max(1, Math.floor(cssW * dpr));
+  canvas.height = Math.max(1, Math.floor(cssH * dpr));
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const L = 58, R = 16, T = 12, B = 36;
+  const w = cssW - L - R, h = cssH - T - B;
+  ctx.clearRect(0, 0, cssW, cssH);
+  ctx.fillStyle = "#111318";
+  ctx.fillRect(L, T, w, h);
+  return { ctx, cssW, cssH, L, T, w, h };
+}
+
+function drawXAxis(ctx, xs, xToX, L, T, w, h, cssH, xlabel) {
+  const n = xs.length;
+  const ticks = 6;
+  ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  for (let i = 0; i <= ticks; i++) {
+    const x = (n ? xs[0] : 0) + ((n > 1 ? xs[n - 1] : (xs[0] || 1)) - (xs[0] || 0)) * i / ticks;
+    const px = xToX(x);
+    ctx.strokeStyle = "#2a2f3a";
+    ctx.beginPath(); ctx.moveTo(px, T); ctx.lineTo(px, T + h); ctx.stroke();
+    ctx.fillStyle = "#9aa0a6";
+    const label = xlabel === "Time [s]" ? Number(x).toPrecision(4) : String(Math.round(x));
+    ctx.fillText(label, px, T + h + 8);
+  }
+  ctx.fillText(xlabel, L + w / 2, cssH - 14);
+}
+
+function drawChart(canvas, series, xs, bounds) {
+  const { ctx, cssW, cssH, L, T, w, h } = setupCanvas(canvas);
+  const { logMin, logMax } = bounds;
+  ctx.strokeStyle = "#2a2f3a";
+  ctx.fillStyle = "#9aa0a6";
+  ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  for (let exp = logMin; exp <= logMax; exp++) {
+    const y = yToY(Math.pow(10, exp), logMin, logMax, T, h);
+    ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + w, y); ctx.stroke();
+    ctx.fillText(exp === 0 ? "1" : "1e" + exp, L - 6, y);
+  }
+  const n = xs.length;
+  const xMin = n ? xs[0] : 0;
+  const xMax = n > 1 ? xs[n - 1] : xMin + 1;
+  const xToX = (x) => L + w * ((x - xMin) / Math.max(xMax - xMin, 1e-30));
+  drawXAxis(ctx, xs, xToX, L, T, w, h, cssH, xMode === "time" ? "Time [s]" : "Iteration (time step)");
+  ctx.lineWidth = 1.6;
+  ctx.lineJoin = "round";
+  for (const field of ORDER) {
+    const vals = series[field];
+    if (!vals) continue;
+    ctx.strokeStyle = COLORS[field] || "#94a3b8";
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < n; i++) {
+      const y = yToY(vals[i], logMin, logMax, T, h);
+      if (y == null) { started = false; continue; }
+      if (!started) { ctx.moveTo(xToX(xs[i]), y); started = true; }
+      else ctx.lineTo(xToX(xs[i]), y);
+    }
+    ctx.stroke();
+  }
+  canvas._map = { kind: "log", L, T, w, h, xMin, xMax, logMin, logMax, xs, series };
+}
+
+function drawLinearChart(canvas, seriesList, refs, ylabel) {
+  const { ctx, cssW, cssH, L, T, w, h } = setupCanvas(canvas);
+  const { yMin, yMax } = linBounds(seriesList, refs);
+  ctx.strokeStyle = "#2a2f3a";
+  ctx.fillStyle = "#9aa0a6";
+  ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  const ticks = 6;
+  for (let i = 0; i <= ticks; i++) {
+    const v = yMin + (yMax - yMin) * i / ticks;
+    const y = yToYlin(v, yMin, yMax, T, h);
+    ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + w, y); ctx.stroke();
+    ctx.fillText(Number(v).toPrecision(4), L - 6, y);
+  }
+  let xMin = Infinity, xMax = -Infinity;
+  for (const s of seriesList) {
+    const xs = s.t || [];
+    if (xs.length) {
+      xMin = Math.min(xMin, xs[0]);
+      xMax = Math.max(xMax, xs[xs.length - 1]);
+    }
+  }
+  if (!isFinite(xMin)) { xMin = 0; xMax = 1; }
+  if (xMin === xMax) xMax = xMin + 1;
+  const xToX = (x) => L + w * ((x - xMin) / Math.max(xMax - xMin, 1e-30));
+  const xGuide = [xMin, xMax];
+  drawXAxis(ctx, xGuide, xToX, L, T, w, h, cssH, "Time [s]");
+
+  ctx.setLineDash([5, 4]);
+  ctx.lineWidth = 1;
+  for (const r of (refs || [])) {
+    const y = yToYlin(r.y, yMin, yMax, T, h);
+    if (y == null) continue;
+    ctx.strokeStyle = r.color || "#9aa0a6";
+    ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + w, y); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  ctx.lineWidth = 1.8;
+  ctx.lineJoin = "round";
+  for (const s of seriesList) {
+    const xs = s.t || [], vals = s.v || [];
+    ctx.strokeStyle = s.color || "#94a3b8";
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < xs.length; i++) {
+      const y = yToYlin(vals[i], yMin, yMax, T, h);
+      if (y == null) { started = false; continue; }
+      if (!started) { ctx.moveTo(xToX(xs[i]), y); started = true; }
+      else ctx.lineTo(xToX(xs[i]), y);
+    }
+    ctx.stroke();
+  }
+  canvas._map = { kind: "lin", L, T, w, h, xMin, xMax, yMin, yMax, seriesList, refs, ylabel };
+}
+
+function nearest(canvas, ev) {
+  const m = canvas._map;
+  if (!m) return;
+  const x = m.xMin + (m.xMax - m.xMin) *
+    ((ev.clientX - canvas.getBoundingClientRect().left - m.L) / Math.max(m.w, 1e-9));
+  const lines = [];
+  if (m.kind === "log") {
+    if (!m.xs.length) return;
+    let j = 0, best = Infinity;
+    for (let i = 0; i < m.xs.length; i++) {
+      const d = Math.abs(m.xs[i] - x);
+      if (d < best) { best = d; j = i; }
+    }
+    lines.push((xMode === "time" ? "t = " : "iter = ") + m.xs[j]);
+    if (data && data.time) lines.push("time = " + data.time[j]);
+    for (const field of ORDER) {
+      const v = m.series[field] && m.series[field][j];
+      if (v > 0) lines.push(field + " = " + Number(v).toExponential(3));
+    }
+  } else {
+    lines.push("t = " + Number(x).toPrecision(5));
+    for (const s of (m.seriesList || [])) {
+      const xs = s.t || [], vals = s.v || [];
+      if (!xs.length) continue;
+      let j = 0, best = Infinity;
+      for (let i = 0; i < xs.length; i++) {
+        const d = Math.abs(xs[i] - x);
+        if (d < best) { best = d; j = i; }
+      }
+      if (vals[j] != null) lines.push(s.label + " = " + Number(vals[j]).toPrecision(5));
+    }
+  }
+  const tip = document.getElementById("tip");
+  tip.style.display = "block";
+  tip.style.left = (ev.clientX + 12) + "px";
+  tip.style.top = (ev.clientY + 12) + "px";
+  tip.innerHTML = lines.join("<br>");
+}
+
+function bindCanvas(canvas) {
+  canvas.addEventListener("mousemove", (ev) => nearest(canvas, ev));
+  canvas.addEventListener("mouseleave", () => {
+    document.getElementById("tip").style.display = "none";
+  });
+}
+
+function addPanel(main, title, legendItems) {
+  const panel = document.createElement("div");
+  panel.className = "panel";
+  panel.innerHTML = "<h2></h2><canvas></canvas><div class='legend'></div>";
+  panel.querySelector("h2").textContent = title;
+  const legend = panel.querySelector(".legend");
+  for (const item of legendItems) {
+    const span = document.createElement("span");
+    span.innerHTML = "<i></i>" + item.label;
+    span.querySelector("i").style.background = item.color;
+    if (item.dash) span.querySelector("i").style.background = "repeating-linear-gradient(90deg," + item.color + " 0 6px, transparent 6px 10px)";
+    legend.appendChild(span);
+  }
+  const canvas = panel.querySelector("canvas");
+  bindCanvas(canvas);
+  main.appendChild(panel);
+  return canvas;
+}
+
+function render() {
+  if (!data || !data.nSteps) return;
+  const empty = document.getElementById("empty");
+  if (empty) empty.remove();
+  document.getElementById("nSteps").textContent = data.nSteps;
+  document.getElementById("latest").textContent =
+    data.latestTime == null ? "—" : Number(data.latestTime).toPrecision(6);
+  document.getElementById("logName").textContent = data.log || "";
+
+  const main = document.getElementById("main");
+  const names = Object.keys(data.regions || {}).sort();
+  main.innerHTML = "";
+  const xs = xValues();
+  for (const name of names) {
+    const series = data.regions[name];
+    const legend = [];
+    for (const field of ORDER) {
+      if (series[field]) legend.push({ label: field, color: COLORS[field] || "#94a3b8" });
+    }
+    const canvas = addPanel(main, name + " residuals", legend);
+    drawChart(canvas, series, xs, logBounds({ r: series }));
+  }
+
+  const o = data.outlets || {};
+  const tg = data.targets || {};
+  const Tseries = [
+    { label: "hot outlet", color: OUT_COLORS.hot, t: (o.T_hot || {}).t || [], v: (o.T_hot || {}).v || [] },
+    { label: "cold outlet", color: OUT_COLORS.cold, t: (o.T_cold || {}).t || [], v: (o.T_cold || {}).v || [] }
+  ];
+  const Trefs = [];
+  if (tg.T_hot != null) Trefs.push({ y: Number(tg.T_hot), color: OUT_COLORS.hot, label: "T_hot inlet" });
+  if (tg.T_cold != null) Trefs.push({ y: Number(tg.T_cold), color: OUT_COLORS.cold, label: "T_cold inlet" });
+  const Tlegend = Tseries.map(s => ({ label: s.label, color: s.color }))
+    .concat(Trefs.map(r => ({ label: r.label, color: r.color, dash: true })));
+  const Tcanvas = addPanel(main, "Outlet temperature [K]", Tlegend);
+  drawLinearChart(Tcanvas, Tseries, Trefs, "T [K]");
+
+  const Mseries = [
+    { label: "hot outlet", color: OUT_COLORS.hot, t: (o.mdot_hot || {}).t || [], v: (o.mdot_hot || {}).v || [] },
+    { label: "cold outlet", color: OUT_COLORS.cold, t: (o.mdot_cold || {}).t || [], v: (o.mdot_cold || {}).v || [] }
+  ];
+  const Mrefs = [];
+  if (tg.mdotHot != null) Mrefs.push({ y: Number(tg.mdotHot), color: OUT_COLORS.hot, label: "mdot_hot target" });
+  if (tg.mdotCold != null) Mrefs.push({ y: Number(tg.mdotCold), color: OUT_COLORS.cold, label: "mdot_cold target" });
+  const Mlegend = Mseries.map(s => ({ label: s.label, color: s.color }))
+    .concat(Mrefs.map(r => ({ label: r.label, color: r.color, dash: true })));
+  const Mcanvas = addPanel(main, "Outlet mass flow [kg/s]", Mlegend);
+  drawLinearChart(Mcanvas, Mseries, Mrefs, "mdot [kg/s]");
+}
+
+render();
+window.addEventListener("resize", render);
+</script>
+</body>
+</html>
+TAIL
+    } > "$dest.tmp" && mv "$dest.tmp" "$dest"
+}
+
+open_plot() {
+    local file=$1
+    if [ -f /.dockerenv ]; then
+        echo "Open residuals.html from this case folder on the host (Mac or Windows)."
+        return 0
+    fi
+    case "$(uname -s)" in
+        Darwin)
+            open "$file"
+            ;;
+        MINGW*|MSYS*|CYGWIN*)
+            cmd.exe /c start "" "$(cygpath -w "$file" 2>/dev/null || echo "$file")"
+            ;;
+        *)
+            if command -v wslview >/dev/null 2>&1; then
+                wslview "$file"
+            elif command -v xdg-open >/dev/null 2>&1; then
+                xdg-open "$file" >/dev/null 2>&1 || true
+            else
+                echo "Open $file in a browser."
+            fi
+            ;;
+    esac
+}
+
+if [ -f "$pidfile" ]; then
+    old=$(cat "$pidfile" 2>/dev/null || true)
+    if [ -n "$old" ] && kill -0 "$old" 2>/dev/null; then
+        write_plot "$log" "$html"
+        echo "Residual plotter already running (PID $old)"
+        echo "Plot: $html"
+        if [ "$do_open" -eq 1 ]; then
+            open_plot "$html"
+        fi
+        exit 0
+    fi
+fi
+
+echo $$ > "$pidfile"
+trap 'rm -f "$pidfile"' EXIT INT TERM
+
+write_plot "$log" "$html"
+echo "Residual plot: $html"
+echo "Watching $log"
+if [ "$do_open" -eq 1 ]; then
+    open_plot "$html"
+fi
+
+if [ "$once" -eq 1 ]; then
+    exit 0
+fi
+
+while true; do
+    write_plot "$log" "$html"
+    sleep 1
+done
