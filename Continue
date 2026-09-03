@@ -35,18 +35,12 @@ if [ -n "$latest" ] && [ -n "$endTime" ]; then
 fi
 
 # Foreground: runParallel redirects to a log, so the terminal looks idle
-# and Ctrl-C may not stop mpirun. tee keeps the terminal live and feeds
-# the residual plotter.
+# and Ctrl-C may not stop mpirun. tee keeps the terminal live.
 app=$(getApplication)
 log="log.$app"
 
-# Append: Continue should not wipe the previous residual history.
+# Append: Continue should not wipe the previous log history.
 touch "$log"
-echo "Residual plot: residuals.html   (re-open with: ./plotResiduals --open)"
-if [ -f /.dockerenv ]; then
-    echo "Open residuals.html from this case folder on the host."
-fi
-nohup ./plotResiduals --log "$log" --open >/dev/null 2>&1 &
 
 echo "Continuing $app ($nProcs processes) from time ${latest:-unknown} on $PWD"
 set -o pipefail

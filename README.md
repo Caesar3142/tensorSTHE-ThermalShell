@@ -2,14 +2,14 @@
 
 OpenFOAM conjugate-heat-transfer case for a shell-and-tube heat exchanger (STHE). Tube-side and shell-side fluids are meshed as two regions. The metal wall is **not** a third mesh: it is a thin thermal shell on the fluid–fluid interface.
 
-Solver: `chtMultiRegionFoam` (OpenFOAM v2412 / v2406 dictionaries).
+Solver: `chtMultiRegionSimpleFoam` (steady pseudo-time; OpenFOAM v2412 / v2406 dictionaries).
 
 | Stream | Region | Path |
 |--------|--------|------|
 | Tube side (hot) | `hot_fluid` | inlet at \(x = 0\), outlet at \(x = 2.4\,\mathrm{m}\) |
 | Shell side (cold) | `cold_fluid` | inlet nozzle at \(z = -0.3\,\mathrm{m}\), outlet at \(z = +0.3\,\mathrm{m}\) |
 
-Default duty: both streams \(2\,\mathrm{kg/s}\) of liquid water, \(T_\mathrm{hot} = 353\,\mathrm{K}\), \(T_\mathrm{cold} = 300\,\mathrm{K}\).
+Operating conditions (mass flow, inlet temperatures, inlet turbulence) are set in `system/include/caseSettings`.
 
 ## How the case works
 
@@ -59,8 +59,9 @@ The same points are in `system/snappyHexMeshDict` (`locationsInMesh`) and `syste
 
 - Incompressible liquid (`heRhoThermo` + `rhoConst`) with constant \(\mu\), \(C_p\), Pr. Both regions default to water at ~300 K.
 - RAS `kEpsilon`, radiation off, gravity `(0 -9.81 0)`.
-- Transient PIMPLE (`nOuterCorrectors 8`, `nNonOrthogonalCorrectors 2` so mapped \(T\) is iterated each step), adjustable \(\Delta t\) with `maxCo 0.5`. `endTime` is in `system/controlDict`.
-- Outlet area-average \(T\) and interface `wallHeatFlux` are logged from `controlDict` function objects.
+- **Steady** SIMPLE (`ddtSchemes default steadyState` in each region). Top-level `system/fvSolution` sets `nOuterCorrectors 8` so mapped-wall \(T\) is exchanged each outer iteration. Regional `fvSolution` uses under-relaxation (`p_rgh` 0.3, `U`/`h`/`k`/`ε` 0.7).
+- `endTime` in `system/controlDict` is a **pseudo-time iteration count**, not physical seconds (`deltaT 1`).
+- Outlet area-average \(T\), outlet mass flow (`sum phi`), and interface `wallHeatFlux` are logged each iteration from `controlDict` function objects (see `log.chtMultiRegionSimpleFoam`).
 
 ## Directory map
 
@@ -68,9 +69,9 @@ The same points are in `system/snappyHexMeshDict` (`locationsInMesh`) and `syste
 constant/triSurface/           STLs in metres — what snappy actually reads
                                (solid.stl, inlet/outlet STLs)
 constant/<region>/             thermo, turbulence, radiation, region polyMesh
-0.orig/<region>/               initial/boundary fields (edit these)
+0.orig/<region>/               initial/boundary field templates (edit these)
 0.orig/include/                shared thermal-shell BC
-system/include/caseSettings    mass flow, T, p, inlet turbulence
+system/include/caseSettings    mass flow, T, p, inlet turbulence (main operating knobs)
 system/blockMeshDict
 system/snappyHexMeshDict
 system/topoSetDict
@@ -79,7 +80,7 @@ system/<region>/               fvSchemes, fvSolution, decomposeParDict
 buildMesh  Run  Continue  reconstruct  Allclean
 ```
 
-`0/` is generated from `0.orig/` and is gitignored. Edit `0.orig/`, then copy again (or re-run `buildMesh`).
+`0/` is generated from `0.orig/` and is gitignored. `./Run` refreshes it automatically; for manual edits use `restore0Dir` or `cp -r 0.orig 0`.
 
 ## Run
 
@@ -87,13 +88,31 @@ Needs an OpenFOAM environment (this repo was run with the `opencfd/openfoam-run`
 
 ```bash
 ./buildMesh          # mesh + restore 0/ from 0.orig/
-./Run                # decompose both regions, then chtMultiRegionFoam -parallel
-./Continue           # resume from the latest processor time (does not decompose)
+./Run                # apply caseSettings, decompose, chtMultiRegionSimpleFoam -parallel
+./Continue           # resume from latest processor time (does not change BCs or decompose)
 ./reconstruct        # assemble missing processor times (both regions, lockstep)
 ./Allclean           # wipe mesh, 0/, logs, processors
 ```
 
-`./Continue` sets `startFrom latestTime` and launches `mpirun` only. Raise `endTime` in `system/controlDict` first if the previous run already reached it. Do not run `./Run` to resume — it re-decomposes from `0/` and wipes processor times.
+### What `./Run` does
+
+1. `restore0Dir` — copy `0.orig/` → `0/`.
+2. Apply `system/include/caseSettings` — write numeric values into `0/<region>/` fields (`massFlowRate`, inlet \(T\), etc.).
+3. Reset `startFrom startTime` / `startTime 0` in `controlDict`.
+4. Remove old iteration folders under `processor*/` (keeps mesh in `processor*/constant/`).
+5. `decomposePar -region …` for each region (`-fields -time 0` when processors already exist).
+6. `mpirun chtMultiRegionSimpleFoam -parallel`, tee to `log.chtMultiRegionSimpleFoam`.
+
+**Save `caseSettings` before `./Run`.** The solver reads values baked into `processor*/0/` at decompose time, not live edits to `caseSettings`.
+
+### `./Run` vs `./Continue`
+
+| Goal | Command |
+|------|---------|
+| Change mdot, inlet \(T\), or restart from time 0 (same mesh) | Edit `caseSettings`, then **`./Run`** |
+| Resume a run with **unchanged** BCs | Raise `endTime` if needed, then **`./Continue`** |
+
+Do **not** use `./Continue` after changing operating conditions — it keeps the old inlet BCs on the processors. Do **not** use `./Run` merely to resume; it resets to time 0 and re-applies `caseSettings`.
 
 `./Run` decomposes **each region** (`decomposePar -region …`). Bare `decomposePar` looks for a default mesh and fails.
 
@@ -103,25 +122,25 @@ Processor count is `numberOfSubdomains` in **all three** files (keep them equal)
 - `system/hot_fluid/decomposeParDict`
 - `system/cold_fluid/decomposeParDict`
 
-Current setting: **8** subdomains, method `hierarchical` with `n (2 2 2)` so both regions use the same xyz cuts. Independent `scotch` partitions put mapped twin faces on different ranks and the wall looks adiabatic. `./Run` overwrites previous `log.decomposePar.*`.
+Current setting: **8** subdomains, method `hierarchical` with `n (2 2 2)` so both regions use the same xyz cuts. Independent `scotch` partitions put mapped twin faces on different ranks and the wall looks adiabatic.
 
 `./reconstruct` reconstructs **both regions at each time** (`reconstructPar -allRegions`). Doing one region’s full series first leaves the other empty if you Ctrl-C. A time dir that exists but is missing `T`/`U`/`phi` (interrupted write) is retried. Progress is printed to the terminal and appended to `log.reconstructPar`.
 
-Serial solve (after `./buildMesh`):
+Serial solve (after `./buildMesh`, or after `./Run`’s restore/apply step):
 
 ```bash
-chtMultiRegionFoam
+chtMultiRegionSimpleFoam
 ```
 
 ## Edit boundary conditions
 
 ### Operating conditions (usual first stop)
 
-`system/include/caseSettings` is included by the field files:
+Edit and **save** `system/include/caseSettings`:
 
 ```
-mdotCold        2.0;       // kg/s
-mdotHot         2.0;       // kg/s
+mdotCold        25.0;       // kg/s
+mdotHot         25.0;       // kg/s
 T_cold          300;       // K
 T_hot           353;       // K
 pRef            1e5;       // Pa
@@ -130,16 +149,9 @@ kInlet          0.01;
 epsilonInlet    0.01;
 ```
 
-Inlets use `flowRateInletVelocity` with `massFlowRate`; outlets use `inletOutlet` (velocity) and `fixedValue` `p_rgh`. Temperature at inlets is `fixedValue`.
+`0.orig/<region>/` field files `#include` this dictionary for documentation, but **`./Run` writes explicit numbers into `0/`** from `caseSettings` before decompose. After changing `caseSettings`, run **`./Run`** — no remesh, no `./Allclean`.
 
-After changing `0.orig/` on an existing mesh:
-
-```bash
-rm -rf 0
-restore0Dir          # or: cp -r 0.orig 0
-```
-
-If processors already exist, re-decompose (or copy fields into `processor*/0/`).
+Inlets use `flowRateInletVelocity` with `massFlowRate`; outlets use `inletOutlet` (velocity) and `fixedFluxPressure` on `p_rgh`. Temperature at inlets is `fixedValue`.
 
 ### Thermal coupling (mapped walls)
 
@@ -177,9 +189,15 @@ Name `T` patches **exactly** for the mapped walls (`hot_fluid_to_cold_fluid`, `c
 
 Turbulence model: `constant/<region>/turbulenceProperties`. Radiation is off in `radiationProperties`.
 
-### Time control
+### Time control and monitoring
 
-`system/controlDict`: `endTime`, `writeInterval`, `maxCo`, `maxDeltaT`.
+`system/controlDict`:
+
+- `endTime` — number of pseudo-time iterations (e.g. 500).
+- `writeInterval` — write fields every N iterations.
+- `deltaT` — fixed at 1 (not physical time).
+
+Function objects log each iteration to the solver log: `outletHotT`, `outletColdT`, `outletHotMdot`, `outletColdMdot`; `wallHeatFluxHot` / `wallHeatFluxCold` on write times.
 
 ## Edit geometry
 
@@ -211,7 +229,7 @@ y: -0.30 .. 0.30
 z: -0.35 .. 0.35
 ```
 
-`(100 40 50)` is the background resolution. Increase it (or snappy surface levels) for a finer mesh.
+`(100 40 60)` is the background resolution (`240k` hex cells). Increase it (or snappy surface levels) for a finer mesh.
 
 ### Seed points after a geometry change
 
@@ -226,8 +244,8 @@ Pick a point clearly inside the tube header for hot, and clearly inside the shel
 
 `system/snappyHexMeshDict`:
 
-- `features` / `refinementSurfaces` levels (currently 2 on `solid` and inlets/outlets)
-- `maxGlobalCells`
+- `features` / `refinementSurfaces` levels (currently `(2 2)` on `solid` and inlets/outlets)
+- `maxGlobalCells` (currently 4M)
 - `addLayers false` (no prism / inflation layers)
 
 Feature-edge extraction: `system/surfaceFeatureExtractDict` (`includedAngle 150`).
@@ -257,5 +275,5 @@ Feature-edge extraction: `system/surfaceFeatureExtractDict` (`includedAngle 150`
 ## Notes
 
 - There is no `solid` region in `constant/regionProperties`. Adding a meshed metal region would be a different case (resolved CHT), not this thermal-shell setup.
-- `0.orig` is the source of truth for fields. Do not rely on editing live `0/` or `processor*/0/` across remeshes.
+- `0.orig` is the source of truth for field **templates**. Operating values come from `caseSettings` when you run `./Run`.
 - Logs (`log.*`), `processor*`, `polyMesh`, and time directories are gitignored.

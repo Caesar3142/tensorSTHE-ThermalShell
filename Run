@@ -5,7 +5,52 @@ cd "${0%/*}" || exit                                # Run from this directory
 
 # Refresh 0/ from 0.orig, bake caseSettings into numeric BCs, push to processors.
 restore0Dir
-./applyCaseSettings
+
+caseSetting() {
+    awk -v key="$1" '
+        $1 == key { v = $2; gsub(/;/, "", v); print v; exit }
+    ' system/include/caseSettings
+}
+
+mdotHot=$(caseSetting mdotHot)
+mdotCold=$(caseSetting mdotCold)
+T_hot=$(caseSetting T_hot)
+T_cold=$(caseSetting T_cold)
+rhoInlet=$(caseSetting rhoInlet)
+kInlet=$(caseSetting kInlet)
+epsilonInlet=$(caseSetting epsilonInlet)
+
+for v in mdotHot mdotCold T_hot T_cold rhoInlet kInlet epsilonInlet; do
+    if [ -z "${!v}" ]; then
+        echo "Error: $v not found in system/include/caseSettings" >&2
+        exit 1
+    fi
+done
+
+foamDictionary 0/hot_fluid/U \
+    -entry "boundaryField.inlet_hot.massFlowRate" -set "constant $mdotHot"
+foamDictionary 0/hot_fluid/U \
+    -entry "boundaryField.inlet_hot.rhoInlet" -set "$rhoInlet"
+foamDictionary 0/cold_fluid/U \
+    -entry "boundaryField.inlet_cold.massFlowRate" -set "constant $mdotCold"
+foamDictionary 0/cold_fluid/U \
+    -entry "boundaryField.inlet_cold.rhoInlet" -set "$rhoInlet"
+foamDictionary 0/hot_fluid/T -entry internalField -set "uniform $T_hot"
+foamDictionary 0/hot_fluid/T \
+    -entry "boundaryField.inlet_hot.value" -set "uniform $T_hot"
+foamDictionary 0/cold_fluid/T -entry internalField -set "uniform $T_cold"
+foamDictionary 0/cold_fluid/T \
+    -entry "boundaryField.inlet_cold.value" -set "uniform $T_cold"
+for region in hot_fluid cold_fluid; do
+    inlet="inlet_${region/_fluid/}"
+    foamDictionary "0/$region/k" -entry internalField -set "uniform $kInlet"
+    foamDictionary "0/$region/k" \
+        -entry "boundaryField.$inlet.value" -set "uniform $kInlet"
+    foamDictionary "0/$region/epsilon" -entry internalField -set "uniform $epsilonInlet"
+    foamDictionary "0/$region/epsilon" \
+        -entry "boundaryField.$inlet.value" -set "uniform $epsilonInlet"
+done
+echo "Applied caseSettings: mdotHot=$mdotHot mdotCold=$mdotCold T_hot=$T_hot T_cold=$T_cold"
 
 foamDictionary system/controlDict -entry startFrom -set startTime
 foamDictionary system/controlDict -entry startTime -set 0
@@ -37,18 +82,12 @@ do
 done
 
 # Foreground: runParallel redirects to a log, so the terminal looks idle
-# and Ctrl-C may not stop mpirun. tee keeps the terminal live and feeds
-# the residual plotter.
+# and Ctrl-C may not stop mpirun. tee keeps the terminal live.
 app=$(getApplication)
 nProcs=$(getNumberOfProcessors)
 log="log.$app"
 
 : > "$log"
-echo "Residual plot: residuals.html   (re-open with: ./plotResiduals --open)"
-if [ -f /.dockerenv ]; then
-    echo "Open residuals.html from this case folder on the host."
-fi
-nohup ./plotResiduals --log "$log" --open >/dev/null 2>&1 &
 
 echo "Running $app ($nProcs processes) on $PWD"
 set -o pipefail
